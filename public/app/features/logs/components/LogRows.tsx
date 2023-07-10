@@ -56,6 +56,29 @@ interface State {
   renderAll: boolean;
 }
 
+// this class generates react-keys that are guaranteed to be unique.
+// it will try to use the provided `maybeId`, but if that's a duplicate,
+// it will use an index-based key.
+class KeyMaker {
+  seen: Set<string>;
+  count: number;
+  constructor() {
+    this.seen = new Set();
+    this.count = 0;
+  }
+
+  getKey(maybeId: string) {
+    this.count += 1;
+    const maybeKey = `id_${maybeId}`;
+    if (this.seen.has(maybeKey)) {
+      return `index_${this.count}`;
+    } else {
+      this.seen.add(maybeKey);
+      return maybeKey;
+    }
+  }
+}
+
 class UnThemedLogRows extends PureComponent<Props, State> {
   renderAllTimer: number | null = null;
 
@@ -122,13 +145,15 @@ class UnThemedLogRows extends PureComponent<Props, State> {
     // React profiler becomes unusable if we pass all rows to all rows and their labels, using getter instead
     const getRows = this.makeGetRows(orderedRows);
 
+    const keyMaker = new KeyMaker();
+
     return (
       <table className={styles.logsRowsTable}>
         <tbody>
           {hasData &&
             firstRows.map((row) => (
               <LogRow
-                key={row.uid}
+                key={keyMaker.getKey(row.uid)}
                 getRows={getRows}
                 row={row}
                 showDuplicates={showDuplicates}
@@ -148,7 +173,7 @@ class UnThemedLogRows extends PureComponent<Props, State> {
             renderAll &&
             lastRows.map((row) => (
               <LogRow
-                key={row.uid}
+                key={keyMaker.getKey(row.uid)}
                 getRows={getRows}
                 row={row}
                 showDuplicates={showDuplicates}
