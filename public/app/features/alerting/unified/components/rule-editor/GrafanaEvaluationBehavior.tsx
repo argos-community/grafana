@@ -89,6 +89,20 @@ export const EvaluateEveryNewGroup = ({ rules }: { rules: RulerRulesConfigDTO | 
     >
       <div className={styles.alignInterval}>
         <Stack direction="row" justify-content="left" align-items="baseline" gap={0}>
+          <InlineLabel htmlFor={'group'} width={16}>
+            Evaluation group name
+          </InlineLabel>
+          <Field
+            className={styles.inlineField}
+            error={errors.group?.message}
+            invalid={!!errors.evaluateEvery}
+            validationMessageHorizontalOverflow={true}
+          >
+            <Input id={'group'} width={8} {...register('group')} />
+          </Field>
+        </Stack>
+
+        <Stack direction="row" justify-content="left" align-items="baseline" gap={0}>
           <InlineLabel
             htmlFor={evaluateEveryId}
             width={16}
@@ -165,7 +179,7 @@ function FolderGroupAndEvaluationInterval({
 
   return (
     <div>
-      <FolderAndGroup />
+      <FolderAndGroup groupfoldersForGrafana={groupfoldersForGrafana} />
       {folderName && isEditingGroup && (
         <EditCloudGroupModal
           namespace={existingNamespace ?? emptyNamespace}
@@ -178,9 +192,7 @@ function FolderGroupAndEvaluationInterval({
         <div className={styles.evaluationContainer}>
           <Stack direction="column" gap={0}>
             <div className={styles.marginTop}>
-              {isNewGroup && groupName ? (
-                <EvaluateEveryNewGroup rules={groupfoldersForGrafana?.result} />
-              ) : (
+              {isNewGroup && groupName ? null : (
                 <Stack direction="column" gap={1}>
                   <div className={styles.evaluateLabel}>
                     {`Alert rules in the `} <span className={styles.bold}>{groupName}</span> group are evaluated every{' '}

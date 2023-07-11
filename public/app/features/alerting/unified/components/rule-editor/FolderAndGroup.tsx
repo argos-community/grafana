@@ -1,23 +1,27 @@
 import { css } from '@emotion/css';
 import { debounce, take, uniqueId } from 'lodash';
-import React, { useCallback, useEffect, useMemo } from 'react';
-import { useFormContext } from 'react-hook-form';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { FormProvider, useForm, useFormContext } from 'react-hook-form';
 
 import { GrafanaTheme2, SelectableValue } from '@grafana/data';
-import { AsyncSelect, Button, Field, InputControl, Label, useStyles2 } from '@grafana/ui';
-import { useDispatch } from 'app/types';
+import { AsyncSelect, Button, Field, Input, InputControl, Label, Modal, useStyles2 } from '@grafana/ui';
+import { contextSrv } from 'app/core/services/context_srv';
+import { AccessControlAction, useDispatch } from 'app/types';
 import { CombinedRuleGroup } from 'app/types/unified-alerting';
+import { RulerRulesConfigDTO } from 'app/types/unified-alerting-dto';
 
 import { useCombinedRuleNamespaces } from '../../hooks/useCombinedRuleNamespaces';
 import { useUnifiedAlertingSelector } from '../../hooks/useUnifiedAlertingSelector';
 import { fetchRulerRulesAction } from '../../state/actions';
 import { RuleFormValues } from '../../types/rule-form';
 import { GRAFANA_RULES_SOURCE_NAME } from '../../utils/datasource';
+import { AsyncRequestState } from '../../utils/redux';
 import { MINUTE } from '../../utils/rule-form';
 import { isGrafanaRulerRule } from '../../utils/rules';
 import { ProvisioningBadge } from '../Provisioning';
 
-import { Folder, RuleFolderPicker } from './RuleFolderPicker';
+import { EvaluateEveryNewGroup } from './GrafanaEvaluationBehavior';
+import { containsSlashes, Folder, RuleFolderPicker } from './RuleFolderPicker';
 import { checkForPathSeparator } from './util';
 
 export const MAX_GROUP_RESULTS = 1000;
@@ -64,7 +68,11 @@ const findGroupMatchingLabel = (group: SelectableValue<string>, query: string) =
   return group.label?.toLowerCase().includes(query.toLowerCase());
 };
 
-export function FolderAndGroup() {
+export function FolderAndGroup({
+  groupfoldersForGrafana,
+}: {
+  groupfoldersForGrafana: AsyncRequestState<RulerRulesConfigDTO | null>;
+}) {
   const {
     formState: { errors },
     watch,
@@ -75,9 +83,17 @@ export function FolderAndGroup() {
   const styles = useStyles2(getStyles);
 
   const folder = watch('folder');
+
+  console.log(folder, 'FOLDER');
   const group = watch('group');
 
   const { groupOptions, loading } = useGetGroupOptionsFromFolder(folder?.title ?? '');
+
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const [isCreatingEvaluationGroup, setIsCreatingEvaluationGroup] = useState(false);
+
+  const onOpenFolderCreationModal = () => setIsCreatingFolder(true);
+  const onOpenEvaluationGroupCreationModal = () => setIsCreatingEvaluationGroup(true);
 
   const resetGroup = useCallback(() => {
     setValue('group', '');
@@ -135,10 +151,18 @@ export function FolderAndGroup() {
 
         <div className={styles.addButton}>
           <span>or</span>
-          <Button onClick={() => {}} type="button" icon="plus" fill="outline" variant="secondary">
+          <Button
+            onClick={onOpenFolderCreationModal}
+            type="button"
+            icon="plus"
+            fill="outline"
+            variant="secondary"
+            disabled={!contextSrv.hasPermission(AccessControlAction.FoldersCreate)}
+          >
             New folder
           </Button>
         </div>
+        {isCreatingFolder && <FolderCreationModal onClose={() => setIsCreatingFolder(false)} />}
       </div>
 
       <div className={styles.evaluationGroupsContainer}>
@@ -195,14 +219,120 @@ export function FolderAndGroup() {
 
         <div className={styles.addButton}>
           <span>or</span>
-          <Button onClick={() => {}} type="button" icon="plus" fill="outline" variant="secondary">
+          <Button
+            onClick={onOpenEvaluationGroupCreationModal}
+            type="button"
+            icon="plus"
+            fill="outline"
+            variant="secondary"
+          >
             New evaluation group
           </Button>
         </div>
+        {isCreatingEvaluationGroup && (
+          <EvaluationGroupCreationModal
+            onClose={() => setIsCreatingEvaluationGroup(false)}
+            groupfoldersForGrafana={groupfoldersForGrafana}
+          />
+        )}
       </div>
     </div>
   );
 }
+
+function FolderCreationModal({ onClose }: { onClose: () => void }): React.ReactElement {
+  const styles = useStyles2(getStyles);
+  const onSubmit = () => {
+    onClose();
+  };
+
+  const {
+    register,
+    formState: { errors, isDirty },
+  } = useFormContext<RuleFormValues>();
+
+  return (
+    <Modal className={styles.modal} isOpen={true} title={'New folder'} onDismiss={onClose} onClickBackdrop={onClose}>
+      <div className={styles.modalTitle}>Create a new folder to store your rule</div>
+
+      <>
+        <Field
+          label={<Label htmlFor="folder">Folder name</Label>}
+          invalid={!!errors.folder}
+          error={errors.folder?.message}
+        >
+          <Input
+            id="folderName"
+            placeholder="Enter a name"
+            {...register('folder', {
+              required: 'Folder name is required.',
+              // validate: (value) =>
+              // (value && containsSlashes(value.title)) || "The folder name can't contain slashes",
+            })}
+            className={styles.formInput}
+          />
+        </Field>
+
+        <Modal.ButtonRow>
+          <Button variant="secondary" type="button" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="button" disabled={!isDirty || !!errors.folder} onClick={(values) => onSubmit()}>
+            Create
+          </Button>
+        </Modal.ButtonRow>
+      </>
+    </Modal>
+  );
+}
+
+function EvaluationGroupCreationModal({
+  onClose,
+  groupfoldersForGrafana,
+}: {
+  onClose: () => void;
+  groupfoldersForGrafana: AsyncRequestState<RulerRulesConfigDTO | null>;
+}): React.ReactElement {
+  const styles = useStyles2(getStyles);
+  const onSubmit = ({ evaluateEvery }: RuleFormValues) => {
+    onClose();
+  };
+
+  const formAPI = useForm<RuleFormValues>({
+    mode: 'onBlur',
+    shouldFocusError: true,
+  });
+  const {
+    handleSubmit,
+    register,
+    setValue,
+    formState: { isDirty, errors },
+  } = formAPI;
+
+  return (
+    <Modal
+      className={styles.modal}
+      isOpen={true}
+      title={'New evaluation group'}
+      onDismiss={onClose}
+      onClickBackdrop={onClose}
+    >
+      <div className={styles.modalTitle}>Create a new evaluation group to use for this alert rule.</div>
+
+      <EvaluateEveryNewGroup rules={groupfoldersForGrafana?.result} />
+
+      <Modal.ButtonRow>
+        <Button variant="secondary" type="button" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button type="button" disabled={!isDirty} onClick={handleSubmit((values) => onSubmit(values))}>
+          Create
+        </Button>
+      </Modal.ButtonRow>
+    </Modal>
+  );
+}
+
 const getStyles = (theme: GrafanaTheme2) => ({
   container: css`
     margin-top: ${theme.spacing(1)};
@@ -233,5 +363,14 @@ const getStyles = (theme: GrafanaTheme2) => ({
     label {
       width: ${theme.breakpoints.values.sm}px;
     }
+  `,
+
+  modal: css`
+    width: ${theme.breakpoints.values.sm}px;
+  `,
+
+  modalTitle: css`
+    color: ${theme.colors.text.secondary};
+    margin-bottom: ${theme.spacing(2)};
   `,
 });
